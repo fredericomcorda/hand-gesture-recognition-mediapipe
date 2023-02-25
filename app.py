@@ -13,12 +13,15 @@ import mediapipe as mp
 
 from utils import CvFpsCalc
 from model import KeyPointClassifier
-from model import PointHistoryClassifier
+from model import PointHistoryClassifier  # we are not measuring the fingers
+import drone_control.tellopy_test as drone
+from datetime import datetime as dt
 
 
 def get_args():
     parser = argparse.ArgumentParser()
 
+    # I'm using the external camera, changed the default to 1 for now, next just use the -- device 1
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--width", help='cap width', type=int, default=960)
     parser.add_argument("--height", help='cap height', type=int, default=540)
@@ -42,7 +45,8 @@ def main():
     # Argument parsing #################################################################
     args = get_args()
 
-    cap_device = args.device
+    #cap_device = args.device
+    cap_device = args.device #drone 
     cap_width = args.width
     cap_height = args.height
 
@@ -58,10 +62,10 @@ def main():
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, cap_height)
 
     # Model load #############################################################
-    mp_hands = mp.solutions.hands
+    mp_hands = mp.solutions.hands  # type:ignore
     hands = mp_hands.Hands(
         static_image_mode=use_static_image_mode,
-        max_num_hands=1,
+        max_num_hands=1,  # for testing I'm  using two hans, this will be reversed
         min_detection_confidence=min_detection_confidence,
         min_tracking_confidence=min_tracking_confidence,
     )
@@ -141,7 +145,7 @@ def main():
 
                 # Hand sign classification
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
-                if hand_sign_id == 2:  # Point gesture
+                if hand_sign_id == "na":  # Point gesture, removed with "na"
                     point_history.append(landmark_list[8])
                 else:
                     point_history.append([0, 0])
@@ -171,7 +175,7 @@ def main():
         else:
             point_history.append([0, 0])
 
-        debug_image = draw_point_history(debug_image, point_history)
+        #debug_image = draw_point_history(debug_image, point_history)
         debug_image = draw_info(debug_image, fps, mode, number)
 
         # Screen reflection #############################################################
@@ -180,6 +184,57 @@ def main():
     cap.release()
     cv.destroyAllWindows()
 
+# funtion to control the drone
+gesture = ""
+takeoff = False
+def drone_action(hand_gesture, delay=1):
+    global gesture
+    global takeoff
+    hand_gesture = hand_gesture.upper()
+    if hand_gesture == gesture or hand_gesture == 'IGNORE':
+        pass
+    elif hand_gesture == "THUMBS-UP":
+        print(f"{hand_gesture} identified -> go up")
+        gesture = "THUMBS-UP"
+        return drone.up(25, delay)
+    elif hand_gesture == "THUMBS-DOWN":
+        print(f"{hand_gesture} identified -> go down")
+        gesture = "THUMBS-DOWN"
+        return drone.down(25, delay)
+    elif hand_gesture == "LEFT":
+        print(f"{hand_gesture} identified -> go left")
+        gesture = "LEFT"
+        return drone.left(25, delay)
+    elif hand_gesture == "RIGHT":
+        print(f"{log_time()}{hand_gesture} identified -> go right")
+        gesture = "RIGHT"
+        return drone.right(25, delay)
+    elif hand_gesture == "FORWARD":
+        print(f"{log_time()}{hand_gesture} identified -> go forward")
+        gesture = "FORWARD"
+        return drone.forward(25, delay)
+    elif hand_gesture == "BACKWARDS":
+        print(f"{log_time()}{hand_gesture} identified -> go backwards")
+        gesture = "BACKWARDS"
+        return drone.backwards(25, delay)
+    elif hand_gesture == "LAND":
+        drone.land()
+        print(f"{log_time()}{hand_gesture} identified -> land")
+        gesture = "LAND"
+        takeoff = False
+    elif hand_gesture == "TAKE OFF":
+        if not takeoff:
+            drone.takeoff()
+            print(f"{log_time()}{hand_gesture} identified -> take off")
+            gesture = "TAKE OFF"
+            takeoff = True
+        else:
+            print(f"{log_time()}{hand_gesture} impossible, drone already in the air")
+    else:
+        print(f'{log_time()} unknow command', end='\r')
+
+def log_time():
+    return f'[{dt.now().strftime("%d-%m-%Y %H:%M:%S")}] '
 
 def select_mode(key, mode):
     number = -1
@@ -189,8 +244,8 @@ def select_mode(key, mode):
         mode = 0
     if key == 107:  # k
         mode = 1
-    if key == 104:  # h
-        mode = 2
+    # if key == 104:  # h
+    #     mode = 2
     return number, mode
 
 
@@ -286,11 +341,11 @@ def logging_csv(number, mode, landmark_list, point_history_list):
         with open(csv_path, 'a', newline="") as f:
             writer = csv.writer(f)
             writer.writerow([number, *landmark_list])
-    if mode == 2 and (0 <= number <= 9):
-        csv_path = 'model/point_history_classifier/point_history.csv'
-        with open(csv_path, 'a', newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([number, *point_history_list])
+    # if mode == 2 and (0 <= number <= 9):
+    #     csv_path = 'model/point_history_classifier/point_history.csv'
+    #     with open(csv_path, 'a', newline="") as f:
+    #         writer = csv.writer(f)
+    #         writer.writerow([number, *point_history_list])
     return
 
 
@@ -394,87 +449,87 @@ def draw_landmarks(image, landmark_point):
 
     # Key Points
     for index, landmark in enumerate(landmark_point):
-        if index == 0:  # 手首1
+        if index == 0:  # Wrist 1
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 1:  # 手首2
+        if index == 1:  # Wrist 2
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 2:  # 親指：付け根
+        if index == 2:  # thumb: root
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 3:  # 親指：第1関節
+        if index == 3:  # thumb: 1 joint
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 4:  # 親指：指先
+        if index == 4:  # thumb: fingertip
             cv.circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-        if index == 5:  # 人差指：付け根
+        if index == 5:  # Index finger：root
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 6:  # 人差指：第2関節
+        if index == 6:  # Index finger: 2nd joint
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 7:  # 人差指：第1関節
+        if index == 7:  # Index finger: 1st joint
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 8:  # 人差指：指先
+        if index == 8:  # index finger: fingertip
             cv.circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-        if index == 9:  # 中指：付け根
+        if index == 9:  # Middle finger: root
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 10:  # 中指：第2関節
+        if index == 10:  # Middle finger: 2nd joint
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 11:  # 中指：第1関節
+        if index == 11:  # Middle finger: 1st joint
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 12:  # 中指：指先
+        if index == 12:  # Middle finger: finger first
             cv.circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-        if index == 13:  # 薬指：付け根
+        if index == 13:  # Ring finger: root
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 14:  # 薬指：第2関節
+        if index == 14:  # Ring finger: 2nd joint
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 15:  # 薬指：第1関節
+        if index == 15:  # Ring finger: 1st joint
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 16:  # 薬指：指先
+        if index == 16:  # Ring finger: fingertip
             cv.circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-        if index == 17:  # 小指：付け根
+        if index == 17:  # Little finger: root
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 18:  # 小指：第2関節
+        if index == 18:  # Little finger: 2nd joint
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 19:  # 小指：第1関節
+        if index == 19:  # Little finger: 1st joint
             cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 20:  # 小指：指先
+        if index == 20:  # little finger: point first
             cv.circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
                       -1)
             cv.circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
@@ -486,28 +541,22 @@ def draw_bounding_rect(use_brect, image, brect):
     if use_brect:
         # Outer rectangle
         cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]),
-                     (0, 0, 0), 1)
-
+                     (0, 0, 255), 1)
     return image
 
 
 def draw_info_text(image, brect, handedness, hand_sign_text,
-                   finger_gesture_text):
+                   finger_gesture_text):  # this variable can be deleted
     cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[1] - 22),
-                 (0, 0, 0), -1)
+                 (0, 0, 255), -1)
 
     info_text = handedness.classification[0].label[0:]
     if hand_sign_text != "":
         info_text = info_text + ':' + hand_sign_text
+        #drone_action(hand_sign_text)
+        print(f'Recognized! - {hand_sign_text}')
     cv.putText(image, info_text, (brect[0] + 5, brect[1] - 4),
                cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv.LINE_AA)
-
-    if finger_gesture_text != "":
-        cv.putText(image, "Finger Gesture:" + finger_gesture_text, (10, 60),
-                   cv.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 4, cv.LINE_AA)
-        cv.putText(image, "Finger Gesture:" + finger_gesture_text, (10, 60),
-                   cv.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2,
-                   cv.LINE_AA)
 
     return image
 
@@ -519,6 +568,8 @@ def draw_point_history(image, point_history):
                       (152, 251, 152), 2)
 
     return image
+
+# this function puttext in the debug image, like FPS and when a mapping is ongoing
 
 
 def draw_info(image, fps, mode, number):

@@ -42,3 +42,4 @@ class PointHistoryClassifier(object):
             result_index = self.invalid_value
 
         return result_index
+
