@@ -247,7 +247,7 @@ def drone_action(hand_gesture, delay=1):
     elif hand_gesture == "THUMBS-UP":
         print(f"{hand_gesture} identified -> go up")
         gesture = "THUMBS-UP"
-        return run_in_thread(lambda: drone("up 25", 4))
+        return run_in_thread(lambda: drone("up 25", 10))
     
     elif hand_gesture == "THUMBS-DOWN":
         print(f"{hand_gesture} identified -> go down")

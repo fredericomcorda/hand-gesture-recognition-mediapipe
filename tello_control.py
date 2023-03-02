@@ -6,7 +6,7 @@ from tello import Tello
 
 class TelloControl(object):
     def __init__(self, tello: Tello):
-        self.tello = tello
+        self.tello = tello 
 
         # RC control velocities
         self.forw_back_velocity = 0

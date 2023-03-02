@@ -2,7 +2,7 @@
 Estimate hand pose using MediaPipe (Python version) and make this sent a command to DJI Tello drone.<br> This is a sample 
 program that recognizes hand signs with a simple MLP using the detected key points.
 <br> ❗ _** the [original repo](https://github.com/Kazuhito00/hand-gesture-recognition-using-mediapipe).**_ ❗
-<br> 
+<br>
 
 This repository contains the following contents.
 * Sample program
