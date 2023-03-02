@@ -2,6 +2,7 @@
 import socket
 import threading
 import time
+from datetime import datetime, timedelta
 
 # IP and port of Tello
 tello_address = ('192.168.10.1', 8889)
@@ -47,14 +48,26 @@ receiveThread = threading.Thread(target=receive)
 receiveThread.daemon = True
 receiveThread.start()
 
+last_action = datetime.now()
+
+def wait(seconds):
+    global last_action
+    while last_action + timedelta(seconds=seconds) > datetime.now():
+      pass
+    return datetime.now()
+
 # Initiate command mode and takeoff
 def takeoff():
+  global last_action
+  last_action = wait(3)
   send("command", 3)
-  time.sleep(10)
+  last_action = wait(5)
+  #time.sleep(10)
   send("takeoff", 5)
 
 #go up
 def up(command, delay=1):
+  last_action = wait(1)
   send("up 25", delay)
 
 #go down
@@ -79,7 +92,7 @@ def backwards(command, delay=1):
  
 # Land
 def land():
-  send("land", 10)
+  send("land", 1)
   print(f'height: {send("height?", 0) }')
 
 # Tello commands respond with an OK when sucessful. This means Tello recognizes
@@ -113,13 +126,6 @@ def spin(direction, times):
 # Use 20 cm/sec as vertical speed
 verticalSpeed = 20.0
 
-def bounce(distance, times):
-
-  bounceDelay = distance/verticalSpeed
-
-  for i in range(times):
-    send("down " + str(distance), bounceDelay)
-    send("up " + str(distance), bounceDelay)
 
 def close_sock():
   sock.close()
@@ -146,5 +152,3 @@ if __name__ == "__main__":
 
   # Close the socket
   sock.close()
-
-

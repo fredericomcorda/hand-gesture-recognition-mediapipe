@@ -4,6 +4,7 @@ import csv
 import copy
 import argparse
 import itertools
+import threading
 from collections import Counter
 from collections import deque
 
@@ -14,8 +15,10 @@ import mediapipe as mp
 from utils import CvFpsCalc
 from model import KeyPointClassifier
 from model import PointHistoryClassifier  # we are not measuring the fingers
-import drone_control.tellopy_test as drone
+#import drone_control.tellopy_test as drone
 from datetime import datetime as dt
+import socket
+import time
 
 
 def get_args():
@@ -35,11 +38,26 @@ def get_args():
                         help='min_tracking_confidence',
                         type=int,
                         default=0.5)
+    
+    parser.add_argument("--tello_ip", type=str, default='192.168.10.1')
+    parser.add_argument("--tello_ip_port", type=int, default=8889)
+    parser.add_argument("--local_address_ip", type=str, default='')
+    parser.add_argument("--local_address_ip_port", type=int, default=9000)
 
     args = parser.parse_args()
 
     return args
 
+
+# Create and start a listening thread that runs in the background
+# This utilizes our receive functions and will continuously monitor for incoming messages
+
+
+
+def run_in_thread(func):
+    thread = threading.Thread(target=func)
+    thread.start()
+    #thread.join()
 
 def main():
     # Argument parsing #################################################################
@@ -55,6 +73,46 @@ def main():
     min_tracking_confidence = args.min_tracking_confidence
 
     use_brect = True
+
+    ## drone socket preparation
+    tello_ip = args.tello_ip
+    tello_ip_port = args.tello_ip_port
+    local_address_ip = args.local_address_ip
+    local_address_ip_port = args.local_address_ip_port
+
+    # IP and port of Tello
+    global tello_address
+    tello_address = (tello_ip, tello_ip_port)
+
+    # IP and port of local computer
+    local_address = (local_address_ip, local_address_ip_port)
+
+    # Create a UDP connection that we'll send the command to
+    global sock
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    # Bind to the local address and port
+    sock.bind(local_address)
+
+    # Received process
+    # Receive the message from Tello
+    def receive():
+        # Continuously loop and listen for incoming messages
+        while True:
+            # Try to receive the message otherwise print the exception
+            try:
+                response, ip_address = sock.recvfrom(128)
+                print("Received message: " + response.decode(encoding='utf-8'))
+            except Exception as e:
+                # If there's an error close the socket and break out of the loop
+                sock.close()
+                print("Error receiving: " + str(e))
+                break
+
+
+    # receiveThread = threading.Thread(target=receive)
+    # receiveThread.daemon = True
+    # receiveThread.start()
 
     # Camera preparation ###############################################################
     cap = cv.VideoCapture(cap_device)
@@ -150,17 +208,17 @@ def main():
                 else:
                     point_history.append([0, 0])
 
-                # Finger gesture classification
-                finger_gesture_id = 0
-                point_history_len = len(pre_processed_point_history_list)
-                if point_history_len == (history_length * 2):
-                    finger_gesture_id = point_history_classifier(
-                        pre_processed_point_history_list)
+                # # Finger gesture classification
+                # finger_gesture_id = 0
+                # point_history_len = len(pre_processed_point_history_list)
+                # if point_history_len == (history_length * 2):
+                #     finger_gesture_id = point_history_classifier(
+                #         pre_processed_point_history_list)
 
-                # Calculates the gesture IDs in the latest detection
-                finger_gesture_history.append(finger_gesture_id)
-                most_common_fg_id = Counter(
-                    finger_gesture_history).most_common()
+                # # Calculates the gesture IDs in the latest detection
+                # finger_gesture_history.append(finger_gesture_id)
+                # most_common_fg_id = Counter(
+                #     finger_gesture_history).most_common()
 
                 # Drawing part
                 debug_image = draw_bounding_rect(use_brect, debug_image, brect)
@@ -169,8 +227,8 @@ def main():
                     debug_image,
                     brect,
                     handedness,
-                    keypoint_classifier_labels[hand_sign_id],
-                    point_history_classifier_labels[most_common_fg_id[0][0]],
+                    keypoint_classifier_labels[hand_sign_id]#,
+                    #point_history_classifier_labels[most_common_fg_id[0][0]],
                 )
         else:
             point_history.append([0, 0])
@@ -185,6 +243,20 @@ def main():
     cv.destroyAllWindows()
 
 # funtion to control the drone
+# Send the message to Tello and allow for a delay in seconds
+def drone(message, delay):
+    # Try to send the message otherwise print the exception
+    try:
+        sock.sendto(message.encode(), tello_address)
+        print("Sending message: " + message)
+    except Exception as e:
+        print("Error sending: " + str(e))
+    # Delay for a user-defined period of time
+    time.sleep(delay)
+
+
+
+
 gesture = ""
 takeoff = False
 def drone_action(hand_gesture, delay=1):
@@ -196,27 +268,34 @@ def drone_action(hand_gesture, delay=1):
     elif hand_gesture == "THUMBS-UP":
         print(f"{hand_gesture} identified -> go up")
         gesture = "THUMBS-UP"
-        return drone.up(25, delay)
+        #run_in_thread(my_function)
+        return run_in_thread(lambda: drone("up 25", 4))
+        #return drone.up(25, delay)
     elif hand_gesture == "THUMBS-DOWN":
         print(f"{hand_gesture} identified -> go down")
         gesture = "THUMBS-DOWN"
-        return drone.down(25, delay)
+        #return drone.down(25, delay)
+        return run_in_thread(lambda: drone.down(25, delay))
     elif hand_gesture == "LEFT":
         print(f"{hand_gesture} identified -> go left")
         gesture = "LEFT"
-        return drone.left(25, delay)
+        #return drone.left(25, delay)
+        return run_in_thread(lambda: drone.left(25, delay))
     elif hand_gesture == "RIGHT":
         print(f"{log_time()}{hand_gesture} identified -> go right")
         gesture = "RIGHT"
-        return drone.right(25, delay)
+        #return drone.right(25, delay)
+        return run_in_thread(lambda: drone.right(25, delay))
     elif hand_gesture == "FORWARD":
         print(f"{log_time()}{hand_gesture} identified -> go forward")
         gesture = "FORWARD"
-        return drone.forward(25, delay)
+        #return drone.forward(25, delay)
+        return run_in_thread(lambda: drone.forward(25, delay))
     elif hand_gesture == "BACKWARDS":
         print(f"{log_time()}{hand_gesture} identified -> go backwards")
         gesture = "BACKWARDS"
-        return drone.backwards(25, delay)
+        #return drone.backwards(25, delay)
+        return run_in_thread(lambda: drone.backwards(25, delay))
     elif hand_gesture == "LAND":
         drone.land()
         print(f"{log_time()}{hand_gesture} identified -> land")
@@ -224,10 +303,11 @@ def drone_action(hand_gesture, delay=1):
         takeoff = False
     elif hand_gesture == "TAKE OFF":
         if not takeoff:
-            drone.takeoff()
             print(f"{log_time()}{hand_gesture} identified -> take off")
             gesture = "TAKE OFF"
             takeoff = True
+            #drone.takeoff()
+            return run_in_thread(lambda: drone.takeoff())
         else:
             print(f"{log_time()}{hand_gesture} impossible, drone already in the air")
     else:
@@ -545,16 +625,15 @@ def draw_bounding_rect(use_brect, image, brect):
     return image
 
 
-def draw_info_text(image, brect, handedness, hand_sign_text,
-                   finger_gesture_text):  # this variable can be deleted
+def draw_info_text(image, brect, handedness, hand_sign_text):
     cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[1] - 22),
                  (0, 0, 255), -1)
 
     info_text = handedness.classification[0].label[0:]
     if hand_sign_text != "":
         info_text = info_text + ':' + hand_sign_text
-        #drone_action(hand_sign_text)
-        print(f'Recognized! - {hand_sign_text}')
+        drone_action(hand_sign_text)
+        #print(f'Recognized! - {hand_sign_text}')
     cv.putText(image, info_text, (brect[0] + 5, brect[1] - 4),
                cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv.LINE_AA)
 
@@ -591,4 +670,6 @@ def draw_info(image, fps, mode, number):
 
 
 if __name__ == '__main__':
-    main()
+    main_program = threading.Thread(target=main)
+    main_program.start()
+    main_program.join()
