@@ -14,7 +14,6 @@ import mediapipe as mp
 
 from utils import CvFpsCalc
 from model import KeyPointClassifier
-from model import PointHistoryClassifier  # we are not measuring the fingers
 from datetime import datetime as dt
 import socket
 import time
