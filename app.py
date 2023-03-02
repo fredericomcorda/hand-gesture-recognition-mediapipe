@@ -15,7 +15,6 @@ import mediapipe as mp
 from utils import CvFpsCalc
 from model import KeyPointClassifier
 from model import PointHistoryClassifier  # we are not measuring the fingers
-#import drone_control.tellopy_test as drone
 from datetime import datetime as dt
 import socket
 import time
@@ -109,7 +108,7 @@ def main():
                 print("Error receiving: " + str(e))
                 break
 
-
+    # to be activated 
     # receiveThread = threading.Thread(target=receive)
     # receiveThread.daemon = True
     # receiveThread.start()
@@ -129,8 +128,6 @@ def main():
     )
 
     keypoint_classifier = KeyPointClassifier()
-
-    point_history_classifier = PointHistoryClassifier()
 
     # Read labels ###########################################################
     with open('model/keypoint_classifier/keypoint_classifier_label.csv',
@@ -154,8 +151,8 @@ def main():
     history_length = 16
     point_history = deque(maxlen=history_length)
 
-    # Finger gesture history ################################################
-    finger_gesture_history = deque(maxlen=history_length)
+    # # Finger gesture history ################################################ remove
+    # finger_gesture_history = deque(maxlen=history_length) remove
 
     #  ########################################################################
     mode = 0
@@ -203,41 +200,24 @@ def main():
 
                 # Hand sign classification
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
-                if hand_sign_id == "na":  # Point gesture, removed with "na"
-                    point_history.append(landmark_list[8])
-                else:
-                    point_history.append([0, 0])
-
-                # # Finger gesture classification
-                # finger_gesture_id = 0
-                # point_history_len = len(pre_processed_point_history_list)
-                # if point_history_len == (history_length * 2):
-                #     finger_gesture_id = point_history_classifier(
-                #         pre_processed_point_history_list)
-
-                # # Calculates the gesture IDs in the latest detection
-                # finger_gesture_history.append(finger_gesture_id)
-                # most_common_fg_id = Counter(
-                #     finger_gesture_history).most_common()
 
                 # Drawing part
                 debug_image = draw_bounding_rect(use_brect, debug_image, brect)
-                debug_image = draw_landmarks(debug_image, landmark_list)
+                # I only want this when mapping the new points
+                #debug_image = draw_landmarks(debug_image, landmark_list)
                 debug_image = draw_info_text(
                     debug_image,
                     brect,
                     handedness,
-                    keypoint_classifier_labels[hand_sign_id]#,
-                    #point_history_classifier_labels[most_common_fg_id[0][0]],
+                    keypoint_classifier_labels[hand_sign_id]
                 )
         else:
             point_history.append([0, 0])
 
-        #debug_image = draw_point_history(debug_image, point_history)
         debug_image = draw_info(debug_image, fps, mode, number)
 
         # Screen reflection #############################################################
-        cv.imshow('Hand Gesture Recognition', debug_image)
+        cv.imshow('Drone Control - Hand Recognition', debug_image)
 
     cap.release()
     cv.destroyAllWindows()
@@ -255,8 +235,6 @@ def drone(message, delay):
     time.sleep(delay)
 
 
-
-
 gesture = ""
 takeoff = False
 def drone_action(hand_gesture, delay=1):
@@ -265,49 +243,49 @@ def drone_action(hand_gesture, delay=1):
     hand_gesture = hand_gesture.upper()
     if hand_gesture == gesture or hand_gesture == 'IGNORE':
         pass
+
     elif hand_gesture == "THUMBS-UP":
         print(f"{hand_gesture} identified -> go up")
         gesture = "THUMBS-UP"
-        #run_in_thread(my_function)
         return run_in_thread(lambda: drone("up 25", 4))
-        #return drone.up(25, delay)
+    
     elif hand_gesture == "THUMBS-DOWN":
         print(f"{hand_gesture} identified -> go down")
         gesture = "THUMBS-DOWN"
-        #return drone.down(25, delay)
-        return run_in_thread(lambda: drone.down(25, delay))
+        return run_in_thread(lambda: drone("down 25", delay))
+    
     elif hand_gesture == "LEFT":
         print(f"{hand_gesture} identified -> go left")
         gesture = "LEFT"
-        #return drone.left(25, delay)
-        return run_in_thread(lambda: drone.left(25, delay))
+        return run_in_thread(lambda: drone("left 25", delay))
+    
     elif hand_gesture == "RIGHT":
         print(f"{log_time()}{hand_gesture} identified -> go right")
         gesture = "RIGHT"
-        #return drone.right(25, delay)
-        return run_in_thread(lambda: drone.right(25, delay))
+        return run_in_thread(lambda: drone("right 25", delay))
+    
     elif hand_gesture == "FORWARD":
         print(f"{log_time()}{hand_gesture} identified -> go forward")
         gesture = "FORWARD"
-        #return drone.forward(25, delay)
-        return run_in_thread(lambda: drone.forward(25, delay))
+        return run_in_thread(lambda: drone("forward 25", delay))
+    
     elif hand_gesture == "BACKWARDS":
         print(f"{log_time()}{hand_gesture} identified -> go backwards")
         gesture = "BACKWARDS"
-        #return drone.backwards(25, delay)
-        return run_in_thread(lambda: drone.backwards(25, delay))
+        return run_in_thread(lambda: drone("back 25", delay))
+    
     elif hand_gesture == "LAND":
-        drone.land()
+        run_in_thread(lambda: drone("land", delay))
         print(f"{log_time()}{hand_gesture} identified -> land")
         gesture = "LAND"
         takeoff = False
+
     elif hand_gesture == "TAKE OFF":
         if not takeoff:
             print(f"{log_time()}{hand_gesture} identified -> take off")
             gesture = "TAKE OFF"
             takeoff = True
-            #drone.takeoff()
-            return run_in_thread(lambda: drone.takeoff())
+            return run_in_thread(lambda: drone("takeoff", delay))
         else:
             print(f"{log_time()}{hand_gesture} impossible, drone already in the air")
     else:
@@ -421,11 +399,6 @@ def logging_csv(number, mode, landmark_list, point_history_list):
         with open(csv_path, 'a', newline="") as f:
             writer = csv.writer(f)
             writer.writerow([number, *landmark_list])
-    # if mode == 2 and (0 <= number <= 9):
-    #     csv_path = 'model/point_history_classifier/point_history.csv'
-    #     with open(csv_path, 'a', newline="") as f:
-    #         writer = csv.writer(f)
-    #         writer.writerow([number, *point_history_list])
     return
 
 
@@ -652,10 +625,11 @@ def draw_point_history(image, point_history):
 
 
 def draw_info(image, fps, mode, number):
-    cv.putText(image, "FPS:" + str(fps), (10, 30), cv.FONT_HERSHEY_SIMPLEX,
-               1.0, (0, 0, 0), 4, cv.LINE_AA)
-    cv.putText(image, "FPS:" + str(fps), (10, 30), cv.FONT_HERSHEY_SIMPLEX,
-               1.0, (255, 255, 255), 2, cv.LINE_AA)
+    # dont want the FPS for now
+    # cv.putText(image, "FPS:" + str(fps), (10, 30), cv.FONT_HERSHEY_SIMPLEX,
+    #            1.0, (0, 0, 0), 4, cv.LINE_AA)
+    # cv.putText(image, "FPS:" + str(fps), (10, 30), cv.FONT_HERSHEY_SIMPLEX,
+    #            1.0, (255, 255, 255), 2, cv.LINE_AA)
 
     mode_string = ['Logging Key Point', 'Logging Point History']
     if 1 <= mode <= 2:
