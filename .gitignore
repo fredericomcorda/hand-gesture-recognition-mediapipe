@@ -136,4 +136,6 @@ dmypy.json
 README.md
 tello_control.py
 tello_control.ipynb
-tello_control.py
+mediapipe_print.py
+trial.py
+trial_im.py

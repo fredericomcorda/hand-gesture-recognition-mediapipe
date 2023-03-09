@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from datetime import datetime as dt, timedelta
 import csv
 import copy
 import argparse
@@ -15,8 +16,9 @@ import mediapipe as mp
 from utils import CvFpsCalc
 from model import KeyPointClassifier
 from datetime import datetime as dt
-import socket
-import time
+
+import tello_control
+from tello_control import drone
 
 
 def get_args():
@@ -31,14 +33,16 @@ def get_args():
     parser.add_argument("--min_detection_confidence",
                         help='min_detection_confidence',
                         type=float,
-                        default=0.7)
+                        default=0.8)  # DEFAULT WAS 0.7
     parser.add_argument("--min_tracking_confidence",
                         help='min_tracking_confidence',
                         type=int,
-                        default=0.5)
-    
-    parser.add_argument("--tello_ip", type=str, default='192.168.10.1')
-    parser.add_argument("--tello_ip_port", type=int, default=8889)
+                        default=0.5)  # DEFAULT WAS 0.5
+
+    parser.add_argument("--tello_ip", help='your drone ip',
+                        type=str, default='192.168.10.1')
+    parser.add_argument("--tello_ip_port",
+                        help='your drone port', type=int, default=8889)
     parser.add_argument("--local_address_ip", type=str, default='')
     parser.add_argument("--local_address_ip_port", type=int, default=9000)
 
@@ -51,18 +55,18 @@ def get_args():
 # This utilizes our receive functions and will continuously monitor for incoming messages
 
 
-
 def run_in_thread(func):
     thread = threading.Thread(target=func)
     thread.start()
-    #thread.join()
+    thread.join()
+
 
 def main():
     # Argument parsing #################################################################
     args = get_args()
 
     #cap_device = args.device
-    cap_device = args.device #drone 
+    cap_device = args.device  # drone
     cap_width = args.width
     cap_height = args.height
 
@@ -72,50 +76,13 @@ def main():
 
     use_brect = True
 
-    ## drone socket preparation
-    tello_ip = args.tello_ip
-    tello_ip_port = args.tello_ip_port
-    local_address_ip = args.local_address_ip
-    local_address_ip_port = args.local_address_ip_port
-
-    # IP and port of Tello
-    global tello_address
-    tello_address = (tello_ip, tello_ip_port)
-
-    # IP and port of local computer
-    local_address = (local_address_ip, local_address_ip_port)
-
-    # Create a UDP connection that we'll send the command to
-    global sock
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    # Bind to the local address and port
-    sock.bind(local_address)
-
-    # Received process
-    # Receive the message from Tello
-    def receive():
-        # Continuously loop and listen for incoming messages
-        while True:
-            # Try to receive the message otherwise print the exception
-            try:
-                response, ip_address = sock.recvfrom(128)
-                print("Received message: " + response.decode(encoding='utf-8'))
-            except Exception as e:
-                # If there's an error close the socket and break out of the loop
-                sock.close()
-                print("Error receiving: " + str(e))
-                break
-
-    # to be activated 
-    # receiveThread = threading.Thread(target=receive)
-    # receiveThread.daemon = True
-    # receiveThread.start()
-
     # Camera preparation ###############################################################
     cap = cv.VideoCapture(cap_device)
     cap.set(cv.CAP_PROP_FRAME_WIDTH, cap_width)
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, cap_height)
+
+    # Drone cam
+    # video_cap = cv.VideoCapture(tello_control.udp_stream())
 
     # Model load #############################################################
     mp_hands = mp.solutions.hands  # type:ignore
@@ -164,6 +131,7 @@ def main():
         if key == 27:  # ESC
             break
         number, mode = select_mode(key, mode)
+        #print(number, mode)
 
         # Camera capture #####################################################
         ret, image = cap.read()
@@ -171,6 +139,9 @@ def main():
             break
         image = cv.flip(image, 1)  # Mirror display
         debug_image = copy.deepcopy(image)
+
+        # drone capture
+        # ret, drone_img = video_cap.read()
 
         # Detection implementation #############################################################
         image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
@@ -200,10 +171,39 @@ def main():
                 # Hand sign classification
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
 
+                global last_action
+                # which_hand handedness.classification[0].index returns 1 for right hand, 0 for left hand
+                which_hand = handedness.classification[0].index
+                #print(handedness.classification[0].index, '\n', end='\r')
+                # movements:
+                # 0-ignore 1-Up, 2-Down, 3-left, 4-right, 5-back, 6-forward, 7-flip, 8-land, 9-take off
+                global takeoff
+                if dt.now() > last_action:
+                    if which_hand == 1:
+                        if hand_sign_id == 0 and not takeoff:
+                            drone_command('takeoff', 5)
+                            takeoff = True
+                        if takeoff:
+                            if hand_sign_id == 1:
+                                drone_command('up 30', 2)
+                            elif hand_sign_id == 2:
+                                drone_command('down 30', 2)
+                            elif hand_sign_id == 3:
+                                drone_command('left 50', 2)
+                            elif hand_sign_id == 4:
+                                drone_command('right 50', 2)
+                            elif hand_sign_id == 5:
+                                drone_command('back 50', 2)
+                            elif hand_sign_id == 6:
+                                drone_command('forward 50', 2)
+                            elif hand_sign_id == 7:
+                                drone_command('land', 10)
+                                takeoff = False
+
                 # Drawing part
                 debug_image = draw_bounding_rect(use_brect, debug_image, brect)
                 # I only want this when mapping the new points
-                #debug_image = draw_landmarks(debug_image, landmark_list)
+                debug_image = draw_landmarks(debug_image, landmark_list)
                 debug_image = draw_info_text(
                     debug_image,
                     brect,
@@ -221,77 +221,19 @@ def main():
     cap.release()
     cv.destroyAllWindows()
 
+
 # funtion to control the drone
 # Send the message to Tello and allow for a delay in seconds
-def drone(message, delay):
-    # Try to send the message otherwise print the exception
-    try:
-        sock.sendto(message.encode(), tello_address)
-        print("Sending message: " + message)
-    except Exception as e:
-        print("Error sending: " + str(e))
-    # Delay for a user-defined period of time
-    time.sleep(delay)
-
-
-gesture = ""
-takeoff = False
-def drone_action(hand_gesture, delay=1):
-    global gesture
-    global takeoff
-    hand_gesture = hand_gesture.upper()
-    if hand_gesture == gesture or hand_gesture == 'IGNORE':
-        pass
-
-    elif hand_gesture == "THUMBS-UP":
-        print(f"{hand_gesture} identified -> go up")
-        gesture = "THUMBS-UP"
-        return run_in_thread(lambda: drone("up 25", 10))
-    
-    elif hand_gesture == "THUMBS-DOWN":
-        print(f"{hand_gesture} identified -> go down")
-        gesture = "THUMBS-DOWN"
-        return run_in_thread(lambda: drone("down 25", delay))
-    
-    elif hand_gesture == "LEFT":
-        print(f"{hand_gesture} identified -> go left")
-        gesture = "LEFT"
-        return run_in_thread(lambda: drone("left 25", delay))
-    
-    elif hand_gesture == "RIGHT":
-        print(f"{log_time()}{hand_gesture} identified -> go right")
-        gesture = "RIGHT"
-        return run_in_thread(lambda: drone("right 25", delay))
-    
-    elif hand_gesture == "FORWARD":
-        print(f"{log_time()}{hand_gesture} identified -> go forward")
-        gesture = "FORWARD"
-        return run_in_thread(lambda: drone("forward 25", delay))
-    
-    elif hand_gesture == "BACKWARDS":
-        print(f"{log_time()}{hand_gesture} identified -> go backwards")
-        gesture = "BACKWARDS"
-        return run_in_thread(lambda: drone("back 25", delay))
-    
-    elif hand_gesture == "LAND":
-        run_in_thread(lambda: drone("land", delay))
-        print(f"{log_time()}{hand_gesture} identified -> land")
-        gesture = "LAND"
-        takeoff = False
-
-    elif hand_gesture == "TAKE OFF":
-        if not takeoff:
-            print(f"{log_time()}{hand_gesture} identified -> take off")
-            gesture = "TAKE OFF"
-            takeoff = True
-            return run_in_thread(lambda: drone("takeoff", delay))
-        else:
-            print(f"{log_time()}{hand_gesture} impossible, drone already in the air")
+def drone_command(command, delay=5):
+    global last_action
+    if dt.now() > last_action:
+        drone_action = threading.Thread(target=lambda: drone(command, delay))
+        drone_action.start()
+        last_action = dt.now() + timedelta(seconds=(1))
     else:
-        print(f'{log_time()} unknow command', end='\r')
+        log_time = f'[{dt.now().strftime("%d-%m-%Y %H:%M:%S")}] '
+        print(f'{log_time}Waiting for last action...', end='\r')
 
-def log_time():
-    return f'[{dt.now().strftime("%d-%m-%Y %H:%M:%S")}] '
 
 def select_mode(key, mode):
     number = -1
@@ -339,6 +281,8 @@ def calc_landmark_list(image, landmarks):
 
     return landmark_point
 
+# get landmark points
+
 
 def pre_process_landmark(landmark_list):
     temp_landmark_list = copy.deepcopy(landmark_list)
@@ -366,6 +310,8 @@ def pre_process_landmark(landmark_list):
 
     return temp_landmark_list
 
+# this is for the finger gesture not developt yet :\
+
 
 def pre_process_point_history(image, point_history):
     image_width, image_height = image.shape[1], image.shape[0]
@@ -388,6 +334,8 @@ def pre_process_point_history(image, point_history):
         itertools.chain.from_iterable(temp_point_history))
 
     return temp_point_history
+
+# add points to the CSV
 
 
 def logging_csv(number, mode, landmark_list, point_history_list):
@@ -604,19 +552,8 @@ def draw_info_text(image, brect, handedness, hand_sign_text):
     info_text = handedness.classification[0].label[0:]
     if hand_sign_text != "":
         info_text = info_text + ':' + hand_sign_text
-        drone_action(hand_sign_text)
-        #print(f'Recognized! - {hand_sign_text}')
     cv.putText(image, info_text, (brect[0] + 5, brect[1] - 4),
                cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv.LINE_AA)
-
-    return image
-
-
-def draw_point_history(image, point_history):
-    for index, point in enumerate(point_history):
-        if point[0] != 0 and point[1] != 0:
-            cv.circle(image, (point[0], point[1]), 1 + int(index / 2),
-                      (152, 251, 152), 2)
 
     return image
 
@@ -624,13 +561,13 @@ def draw_point_history(image, point_history):
 
 
 def draw_info(image, fps, mode, number):
-    # dont want the FPS for now
-    # cv.putText(image, "FPS:" + str(fps), (10, 30), cv.FONT_HERSHEY_SIMPLEX,
-    #            1.0, (0, 0, 0), 4, cv.LINE_AA)
-    # cv.putText(image, "FPS:" + str(fps), (10, 30), cv.FONT_HERSHEY_SIMPLEX,
-    #            1.0, (255, 255, 255), 2, cv.LINE_AA)
-
+    # dont want the FPS| for now
+    cv.putText(image, "FPS:" + str(fps), (10, 30), cv.FONT_HERSHEY_SIMPLEX,
+               1.0, (0, 0, 0), 4, cv.LINE_AA)
+    cv.putText(image, "FPS:" + str(fps), (10, 30), cv.FONT_HERSHEY_SIMPLEX,
+               1.0, (255, 255, 255), 2, cv.LINE_AA)
     mode_string = ['Logging Key Point', 'Logging Point History']
+
     if 1 <= mode <= 2:
         cv.putText(image, "MODE:" + mode_string[mode - 1], (10, 90),
                    cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
@@ -643,6 +580,11 @@ def draw_info(image, fps, mode, number):
 
 
 if __name__ == '__main__':
+    takeoff = False
+    last_action = dt.now()
     main_program = threading.Thread(target=main)
     main_program.start()
+    drone_control = threading.Thread(drone("command", 1))
+    drone_control.start()
     main_program.join()
+    drone_control.join()
