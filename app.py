@@ -6,6 +6,7 @@ import copy
 import argparse
 import itertools
 import threading
+import tkinter as tk
 from collections import Counter
 from collections import deque
 
@@ -17,8 +18,9 @@ from utils import CvFpsCalc
 from model import KeyPointClassifier
 from datetime import datetime as dt
 
-import tello_control
+#import tello_control
 from tello_control import drone
+# from tello_control import get_response
 
 
 def get_args():
@@ -33,11 +35,11 @@ def get_args():
     parser.add_argument("--min_detection_confidence",
                         help='min_detection_confidence',
                         type=float,
-                        default=0.8)  # DEFAULT WAS 0.7
+                        default=0.9)  # DEFAULT WAS 0.7
     parser.add_argument("--min_tracking_confidence",
                         help='min_tracking_confidence',
                         type=int,
-                        default=0.5)  # DEFAULT WAS 0.5
+                        default=0.8)  # DEFAULT WAS 0.5
 
     parser.add_argument("--tello_ip", help='your drone ip',
                         type=str, default='192.168.10.1')
@@ -59,6 +61,28 @@ def run_in_thread(func):
     thread = threading.Thread(target=func)
     thread.start()
     thread.join()
+
+
+def get_label():
+    root = tk.Tk()
+
+    input_label = tk.Label(root, text="Enter a number:")
+    input_label.pack()
+
+    input_entry = tk.Entry(root)
+    input_entry.pack()
+
+    def get_label_number():
+        number = int(input_entry.get())
+        print("Please input the label number:", number)
+        root.destroy()
+        return number
+
+    store_button = tk.Button(root, text="Label Number",
+                             command=get_label_number)
+    store_button.pack()
+
+    root.mainloop()
 
 
 def main():
@@ -178,27 +202,30 @@ def main():
                 # movements:
                 # 0-ignore 1-Up, 2-Down, 3-left, 4-right, 5-back, 6-forward, 7-flip, 8-land, 9-take off
                 global takeoff
-                if dt.now() > last_action:
-                    if which_hand == 1:
-                        if hand_sign_id == 0 and not takeoff:
-                            drone_command('takeoff', 5)
-                            takeoff = True
-                        if takeoff:
-                            if hand_sign_id == 1:
-                                drone_command('up 30', 2)
-                            elif hand_sign_id == 2:
-                                drone_command('down 30', 2)
-                            elif hand_sign_id == 3:
-                                drone_command('left 50', 2)
-                            elif hand_sign_id == 4:
-                                drone_command('right 50', 2)
-                            elif hand_sign_id == 5:
-                                drone_command('back 50', 2)
-                            elif hand_sign_id == 6:
-                                drone_command('forward 50', 2)
-                            elif hand_sign_id == 7:
-                                drone_command('land', 10)
-                                takeoff = False
+                if mode == 0:
+                    if dt.now() > last_action:
+                        if which_hand == 1:
+                            if hand_sign_id == 0 and not takeoff:
+                                drone_command('takeoff', 5)
+                                takeoff = True
+                            if takeoff:
+                                if hand_sign_id == 1:
+                                    drone_command('up 30', 2)
+                                elif hand_sign_id == 2:
+                                    drone_command('down 30', 2)
+                                elif hand_sign_id == 3:
+                                    drone_command('left 50', 2)
+                                elif hand_sign_id == 4:
+                                    drone_command('right 50', 2)
+                                elif hand_sign_id == 5:
+                                    drone_command('back 50', 2)
+                                elif hand_sign_id == 6:
+                                    drone_command('forward 50', 2)
+                                elif hand_sign_id == 8:
+                                    drone_command('cw 90', 5)
+                                elif hand_sign_id == 7:
+                                    drone_command('land', 10)
+                                    takeoff = False
 
                 # Drawing part
                 debug_image = draw_bounding_rect(use_brect, debug_image, brect)
@@ -580,10 +607,14 @@ def draw_info(image, fps, mode, number):
 
 
 if __name__ == '__main__':
+
     takeoff = False
     last_action = dt.now()
     main_program = threading.Thread(target=main)
     main_program.start()
+
+    # Create an Event object
+
     drone_control = threading.Thread(drone("command", 1))
     drone_control.start()
     main_program.join()
